@@ -109,12 +109,20 @@
 
       <div class="output-section">
         <div class="output-header">
-          <span class="output-label">BBCode Output</span>
-          <button class="btn btn-copy" @click="copyToClipboard">
-            {{ copied ? "Copied!" : "Copy" }}
-          </button>
+          <span class="output-label">{{ showPreview ? "Preview" : "BBCode Output" }}</span>
+          <div class="output-actions">
+            <button class="btn btn-copy" @click="showPreview = !showPreview">
+              {{ showPreview ? "BBCode" : "Preview" }}
+            </button>
+            <button class="btn btn-copy" @click="copyToClipboard">
+              {{ copied ? "Copied!" : "Copy" }}
+            </button>
+          </div>
         </div>
-        <textarea class="bbcode-box" readonly :value="bbcode" />
+        <textarea v-if="!showPreview" class="bbcode-box" readonly :value="bbcode" />
+        <div v-else class="preview-panel" aria-label="Steam guide BBCode preview">
+          <div class="steam-preview" v-html="bbcodePreviewHtml"></div>
+        </div>
       </div>
 
     </div>
@@ -153,12 +161,20 @@
 
       <div class="output-section">
         <div class="output-header">
-          <span class="output-label">BBCode Output</span>
-          <button class="btn btn-copy" @click="copyFooterToClipboard">
-            {{ copiedFooter ? "Copied!" : "Copy" }}
-          </button>
+          <span class="output-label">{{ showPreview ? "Preview" : "BBCode Output" }}</span>
+          <div class="output-actions">
+            <button class="btn btn-copy" @click="showPreview = !showPreview">
+              {{ showPreview ? "BBCode" : "Preview" }}
+            </button>
+            <button class="btn btn-copy" @click="copyFooterToClipboard">
+              {{ copiedFooter ? "Copied!" : "Copy" }}
+            </button>
+          </div>
         </div>
-        <textarea class="bbcode-box" readonly :value="footerBbcode" />
+        <textarea v-if="!showPreview" class="bbcode-box" readonly :value="footerBbcode" />
+        <div v-else class="preview-panel" aria-label="Steam guide footer BBCode preview">
+          <div class="steam-preview" v-html="footerPreviewHtml"></div>
+        </div>
       </div>
 
     </div>
@@ -218,6 +234,7 @@ const addUserDescriptions = computed<boolean>({
 
 const copied = ref(false);
 const copiedFooter = ref(false);
+const showPreview = ref(false);
 const exporting = ref(false);
 const showConfirm = ref(false);
 const exportStatus = ref<{ type: "success" | "error"; message: string } | null>(null);
@@ -325,6 +342,116 @@ const bbcode = computed(() => {
   }
   return buildSeparatedList(selectedGroup.value, addUserDescriptions.value);
 });
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function renderPreviewImage(value: string, imageByName: Map<string, string>): string {
+  const name = value.match(/\[b\]([\s\S]*?)\[\/b\]/i)?.[1]?.trim();
+  const icon = name ? imageByName.get(name) : undefined;
+
+  if (!icon) return '<span class="preview-image-placeholder">IMG</span>';
+
+  return `<img class="preview-achievement-image" src="${escapeHtml(icon)}" alt="${escapeHtml(name ?? "Achievement image")}" />`;
+}
+
+function renderInlineBbcode(value: string, imageByName = new Map<string, string>()): string {
+  return escapeHtml(value)
+    .replace(/\[b\]([\s\S]*?)\[\/b\]/gi, "<strong>$1</strong>")
+    .replace(/\[i\]([\s\S]*?)\[\/i\]/gi, "<em>$1</em>")
+    .replace(/__IMG__/g, renderPreviewImage(value, imageByName));
+}
+
+function renderAchievementPreviewBlock(lines: string[], index: number, imageByName: Map<string, string>) {
+  const imageLine = lines[index];
+  const title = imageLine.match(/\[b\]([\s\S]*?)\[\/b\]/i)?.[1]?.trim() ?? "";
+  const icon = title ? imageByName.get(title) : undefined;
+  const imageHtml = icon
+    ? `<img class="preview-achievement-image" src="${escapeHtml(icon)}" alt="${escapeHtml(title)}" />`
+    : '<span class="preview-image-placeholder preview-image-large">IMG</span>';
+  const titleHtml = renderInlineBbcode(imageLine.replace("__IMG__", ""), imageByName);
+
+  const bodyLines: string[] = [];
+  let nextIndex = index + 1;
+
+  while (nextIndex < lines.length) {
+    const next = lines[nextIndex].trim();
+
+    if (!next || next === NL || next.includes("__IMG__") || /^-{8,}$/.test(next)) break;
+    bodyLines.push(lines[nextIndex]);
+    nextIndex += 1;
+  }
+
+  const bodyHtml = bodyLines
+    .map((line) => `<div class="preview-achievement-description">${renderInlineBbcode(line, imageByName)}</div>`)
+    .join("");
+
+  return {
+    html: `
+      <div class="preview-achievement-block">
+        ${imageHtml}
+        <div class="preview-achievement-copy">
+          <div class="preview-achievement-title">${titleHtml}</div>
+          ${bodyHtml}
+        </div>
+      </div>
+    `,
+    nextIndex,
+  };
+}
+
+function renderSteamBbcodePreview(value: string, imageByName = new Map<string, string>()): string {
+  const lines = value.split("\n");
+  const rendered: string[] = [];
+
+  for (let index = 0; index < lines.length;) {
+    const line = lines[index];
+    const trimmed = line.trim();
+
+    if (line.includes("__IMG__")) {
+      const block = renderAchievementPreviewBlock(lines, index, imageByName);
+      rendered.push(block.html);
+      index = block.nextIndex;
+      continue;
+    }
+
+    if (!trimmed) {
+      rendered.push('<div class="preview-spacer"></div>');
+    } else if (/^-{8,}$/.test(trimmed)) {
+      rendered.push('<hr class="preview-divider" />');
+    } else if (/^\[h1\]\s*\[\/h1\]$/i.test(trimmed)) {
+      rendered.push('<div class="preview-h1-spacer"></div>');
+    } else {
+      const heading = trimmed.match(/^\[h1\]([\s\S]*?)\[\/h1\]$/i);
+      rendered.push(
+        heading
+          ? `<h4 class="preview-heading">${renderInlineBbcode(heading[1], imageByName)}</h4>`
+          : `<div class="preview-line">${renderInlineBbcode(line, imageByName)}</div>`
+      );
+    }
+
+    index += 1;
+  }
+
+  return rendered.join("");
+}
+
+const selectedPreviewImages = computed(() => {
+  const images = new Map<string, string>();
+  selectedGroup.value?.achievements.forEach((achievement) => {
+    images.set(achievement.name, achievement.icon);
+  });
+  return images;
+});
+
+const bbcodePreviewHtml = computed(() => renderSteamBbcodePreview(bbcode.value, selectedPreviewImages.value));
+const footerPreviewHtml = computed(() => renderSteamBbcodePreview(footerBbcode.value));
 
 // ─── Export Logic ─────────────────────────────────────────────────────────────
 
@@ -813,6 +940,12 @@ function goBack() {
   align-items: center;
 }
 
+.output-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .output-label {
   font-size: 13px;
   font-weight: 600;
@@ -832,6 +965,135 @@ function goBack() {
   resize: vertical;
   box-sizing: border-box;
   width: 100%;
+}
+
+.preview-panel {
+  flex: 1;
+  min-height: 200px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #1b2838;
+  color: #c7d5e0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.steam-preview {
+  flex: 1;
+  overflow: auto;
+  padding: 22px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.steam-preview :deep(strong) {
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.steam-preview :deep(em) {
+  color: #acb8c1;
+}
+
+.steam-preview :deep(.preview-line) {
+  min-height: 17px;
+  overflow-wrap: anywhere;
+  color: #b8b6b4;
+  font-family: monospace;
+  font-size: 14px;
+}
+
+.steam-preview :deep(.preview-heading) {
+  margin: 0 0 16px;
+  color: #66c0f4;
+  font-size: 20px;
+  font-weight: 400;
+}
+
+.steam-preview :deep(.preview-spacer) {
+  height: 6px;
+}
+
+.steam-preview :deep(.preview-h1-spacer) {
+  height: 18px;
+}
+
+.steam-preview :deep(.preview-divider) {
+  border: 0;
+  border-top: 1px solid rgba(199, 213, 224, 0.35);
+  margin: 10px 0;
+}
+
+.steam-preview :deep(.preview-image-placeholder) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  margin-right: 8px;
+  border: 1px dashed rgba(199, 213, 224, 0.45);
+  border-radius: 4px;
+  background: rgba(102, 192, 244, 0.12);
+  color: #66c0f4;
+  font-size: 10px;
+  font-style: normal;
+  vertical-align: middle;
+}
+
+.steam-preview :deep(.preview-achievement-image) {
+  width: 220px;
+  height: 220px;
+  flex: 0 0 220px;
+  border-radius: 0;
+  object-fit: cover;
+  vertical-align: top;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.steam-preview :deep(.preview-achievement-block) {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 8px 0 20px;
+  max-width: 760px;
+}
+
+.steam-preview :deep(.preview-achievement-copy) {
+  min-width: 0;
+  padding-top: 0;
+}
+
+.steam-preview :deep(.preview-achievement-title) {
+  color: #b8b6b4;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.steam-preview :deep(.preview-achievement-description) {
+  color: #b8b6b4;
+  font-size: 15px;
+  font-style: italic;
+  line-height: 1.45;
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+
+.steam-preview :deep(.preview-image-large) {
+  width: 220px;
+  height: 220px;
+  flex: 0 0 220px;
+}
+
+@media (max-width: 900px) {
+  .steam-preview :deep(.preview-achievement-image),
+  .steam-preview :deep(.preview-image-large) {
+    width: 160px;
+    height: 160px;
+    flex-basis: 160px;
+  }
 }
 
 /* BUTTONS */
