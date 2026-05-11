@@ -38,11 +38,18 @@
             "fs:allow-read-text-file",
             "fs:allow-write-text-file",
             "fs:allow-mkdir",
+            "fs:allow-copy-file",
             "http:default",
             {
               "identifier": "fs:scope",
               "allow": [
                 { "path": "$HOME/SteamRanger/**" }
+              ]
+            },
+            {
+              "identifier": "opener:allow-open-path",
+              "allow": [
+                { "path": "$HOME/SteamRanger/output_for_users/**" }
               ]
             }
           ]

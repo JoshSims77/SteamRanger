@@ -184,6 +184,7 @@ import {
   copyFile,
   readDir
 } from "@tauri-apps/plugin-fs";
+import { openPath } from "@tauri-apps/plugin-opener";
 import { steamApi } from "./lib/steamApi";
 import { join, homeDir } from "@tauri-apps/api/path";
 
@@ -361,7 +362,7 @@ async function buildExport(): Promise<void> {
         console.warn(`Could not download icon for ${ach.name}`);
       }
     }
-    
+
     const opts = getOptions(group.id);
     const code = opts.formatType === "connected"
       ? buildConnectedList(group, opts.addUserDescriptions)
@@ -378,22 +379,22 @@ async function buildExport(): Promise<void> {
 
   const additionalImages = await join(gameFolder, "additional_images");
   await mkdir(additionalImages, { recursive: true });
-  
-const lettersSource = await join(home, "SteamRanger", "src", "assets", "letters");
-try {
-  const entries = await readDir(lettersSource);
-  for (const entry of entries) {
-    if (entry.name) {
-      const src = await join(lettersSource, entry.name);
-      const dest = await join(imagesFolder, entry.name);
-      await copyFile(src, dest);
+
+  const lettersSource = await join(home, "SteamRanger", "src", "assets", "letters");
+  try {
+    const entries = await readDir(lettersSource);
+    for (const entry of entries) {
+      if (entry.name) {
+        const src = await join(lettersSource, entry.name);
+        const dest = await join(imagesFolder, entry.name);
+        await copyFile(src, dest);
+      }
     }
+  } catch (e: any) {
+    console.warn("Letters path attempted:", lettersSource);
+    console.warn("Letters error (raw):", e);
+    console.warn("Letters error (json):", JSON.stringify(e));
   }
-} catch (e:any) {
-  console.warn("Letters path attempted:", lettersSource);
-  console.warn("Letters error (raw):", e);
-  console.warn("Letters error (json):", JSON.stringify(e))
-}
 }
 
 async function handleExport(): Promise<void> {
@@ -429,7 +430,7 @@ async function confirmOverwrite(): Promise<void> {
   await runExport(gameFolder);
 }
 
-async function runExport(_gameFolder: string): Promise<void> {
+async function runExport(gameFolder: string): Promise<void> {
   exporting.value = true;
   exportStatus.value = null;
 
@@ -439,7 +440,6 @@ async function runExport(_gameFolder: string): Promise<void> {
       type: "success",
       message: `Exported to /SteamRanger/output_for_users/${toFolderName(gameName.value)}`
     };
-    await open(_gameFolder);
   } catch (e: any) {
     exportStatus.value = {
       type: "error",
@@ -447,6 +447,13 @@ async function runExport(_gameFolder: string): Promise<void> {
     };
   } finally {
     exporting.value = false;
+  }
+
+  // Open folder separately — don't let this failure affect the export status
+  try {
+    await openPath(gameFolder);
+  } catch (e: any) {
+    console.warn("Could not open folder in explorer:", e);
   }
 }
 
