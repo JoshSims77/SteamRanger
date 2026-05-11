@@ -23,3 +23,4 @@ reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
 tokio = { version = "1", features = ["full"] }
 tauri-plugin-updater = "2.10.1"
 tauri-plugin-process = "2.3.1"
+image = "0.25"

@@ -74,9 +74,14 @@ async fn download_icon(url: String, dest_path: String) -> Result<(), String> {
             .map_err(|e| format!("Failed to create dir: {}", e))?;
     }
 
-    tokio::fs::write(&path, &bytes)
-        .await
-        .map_err(|e| format!("Failed to write file: {}", e))?;
+    // Decode, resize to 128x128, and re-encode as PNG
+    let img = image::load_from_memory(&bytes)
+        .map_err(|e| format!("Failed to decode image: {}", e))?;
+
+    let resized = img.resize_exact(128, 128, image::imageops::FilterType::Lanczos3);
+
+    resized.save(&path)
+        .map_err(|e| format!("Failed to save image: {}", e))?;
 
     Ok(())
 }
